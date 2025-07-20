@@ -1,0 +1,164 @@
+#include <Servo.h>
+#include <DHT.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Pin Definitions
+#define TRIG_DOOR 9
+#define ECHO_DOOR 10
+#define TRIG_FUEL 7
+#define ECHO_FUEL 8
+#define SERVO_LEFT 3
+#define SERVO_RIGHT 4
+#define GREEN_LED 2
+#define RED_LED 6
+#define DHTPIN 5
+#define DHTTYPE DHT11
+
+// Thresholds
+#define DISTANCE_THRESHOLD_DOOR 50  // cm
+#define TEMP_THRESHOLD 50           // °C
+#define FUEL_THRESHOLD 30           // cm
+
+Servo servoLeft;
+Servo servoRight;
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(TRIG_DOOR, OUTPUT);
+  pinMode(ECHO_DOOR, INPUT);
+  pinMode(TRIG_FUEL, OUTPUT);
+  pinMode(ECHO_FUEL, INPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+
+  servoLeft.attach(SERVO_LEFT);
+  servoRight.attach(SERVO_RIGHT);
+  servoLeft.write(0);
+  servoRight.write(0);
+
+  dht.begin();
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("OLED init failed"));
+    while (true);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Smart Car Ready");
+  display.display();
+  delay(2000);
+}
+
+void loop() {
+  Serial.println(F("----- LOOP START -----"));
+
+  // --- Door Sensor ---
+  long distanceDoor = measureDistance(TRIG_DOOR, ECHO_DOOR);
+  bool doorOpen = false;
+  if (distanceDoor > 0 && distanceDoor < DISTANCE_THRESHOLD_DOOR) {
+    servoLeft.write(90);
+    servoRight.write(90);
+    doorOpen = true;
+    Serial.println("Door: OPEN");
+  } else {
+    servoLeft.write(0);
+    servoRight.write(0);
+    doorOpen = false;
+    Serial.println("Door: CLOSED");
+  }
+
+  // --- Temperature & Humidity ---
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println(F("DHT read fail"));
+    return;
+  }
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" C");
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+
+  bool overTemp = (temperature > TEMP_THRESHOLD);
+  if (overTemp) {
+    Serial.println("Warning: Over Temp");
+  }
+
+  // --- Fuel Sensor ---
+  long distanceFuel = measureDistance(TRIG_FUEL, ECHO_FUEL);
+  String fuelStatus = "N/A";
+  bool fuelLow = false;
+  if (distanceFuel > 0) {
+    fuelLow = distanceFuel > FUEL_THRESHOLD;
+    fuelStatus = fuelLow ? "Low" : "OK";
+  }
+  Serial.print("Fuel Distance: ");
+  Serial.print(distanceFuel);
+  Serial.println(" cm");
+  Serial.print("Fuel Status: ");
+  Serial.println(fuelStatus);
+
+  // --- LED Logic ---
+  if (!fuelLow && !overTemp && !doorOpen) {
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(RED_LED, LOW);
+  } else {
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(RED_LED, HIGH);
+  }
+
+  // --- OLED Display ---
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("Temp: ");
+  display.print(temperature);
+  display.println(" C");
+
+  display.setCursor(0, 10);
+  display.print("Hum: ");
+  display.print(humidity);
+  display.println(" %");
+
+  display.setCursor(0, 22);
+  display.print("Fuel: ");
+  display.println(fuelStatus);
+
+  display.setCursor(0, 34);
+  display.print("Door: ");
+  display.println(doorOpen ? "OPEN" : "CLOSED");
+
+  display.setCursor(0, 46);
+  if (fuelLow || overTemp || doorOpen) {
+    display.print("Status: ALERT");
+  } else {
+    display.print("Status: OK");
+  }
+
+  display.display();
+
+  Serial.println(F("----- LOOP END -----\n"));
+  delay(2000);
+}
+
+long measureDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  if (duration == 0) return -1;
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
