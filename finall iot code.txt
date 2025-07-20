@@ -1,0 +1,140 @@
+#include <LiquidCrystal.h>
+#include <Servo.h>
+
+// LCD: RS, E, D4–D7
+LiquidCrystal lcd(12, 11, A2, A3, A4, A5);
+
+// Servo
+Servo fuelServo;
+
+// Pin definitions
+const int fuelSensorPin = A0;
+const int tempSensorPin = A1;
+const int lightSensorPin = A2;  // LDR input
+const int startBtnPin   = 4;
+const int stopBtnPin    = 5;
+const int greenLEDPin   = 7;
+const int redLEDPin     = 8;
+const int buzzerPin     = 6;
+const int trigPin       = 9;
+const int echoPin       = 10;
+const int servoPin      = 3;
+
+bool tripActive = false;
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(fuelSensorPin, INPUT);
+  pinMode(tempSensorPin, INPUT);
+  pinMode(lightSensorPin, INPUT);
+  pinMode(startBtnPin, INPUT_PULLUP);
+  pinMode(stopBtnPin, INPUT_PULLUP);
+
+  pinMode(greenLEDPin, OUTPUT);
+  pinMode(redLEDPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  lcd.begin(16, 2);
+  lcd.print("Fleet Manager");
+  delay(1500);
+  lcd.clear();
+
+  fuelServo.attach(servoPin);
+  fuelServo.write(0);
+
+  digitalWrite(redLEDPin, LOW);
+  digitalWrite(greenLEDPin, LOW);
+  noTone(buzzerPin);
+}
+
+void loop() {
+  // Check button input
+  if (digitalRead(startBtnPin) == LOW) {
+    tripActive = true;
+    Serial.println(">> Trip STARTED");
+    delay(200);
+  }
+  if (digitalRead(stopBtnPin) == LOW) {
+    tripActive = false;
+    Serial.println(">> Trip STOPPED");
+    delay(200);
+  }
+
+  lcd.clear();
+
+  if (tripActive) {
+    // Read sensor values
+    int rawFuel = analogRead(fuelSensorPin);
+    int rawTemp = analogRead(tempSensorPin);
+    int lightVal = analogRead(lightSensorPin);
+    int fuelPercent = map(rawFuel, 0, 1023, 0, 100);
+    float voltage = rawTemp * (5.0 / 1023.0);
+    float tempC = (voltage - 0.5) * 100.0;
+    long distCm = readHCSR04();
+
+    // Servo for fuel
+    int fuelAngle = map(fuelPercent, 0, 100, 0, 180);
+    fuelServo.write(fuelAngle);
+
+    // Serial output
+    Serial.print("Fuel: "); Serial.print(fuelPercent); Serial.print("% | ");
+    Serial.print("Temp: "); Serial.print(tempC); Serial.print("C | ");
+    Serial.print("Dist: "); Serial.print(distCm); Serial.print("cm | ");
+    Serial.print("Light: "); Serial.println(lightVal);
+
+    // LCD Output
+    lcd.setCursor(0, 0);
+    lcd.print("F:");
+    lcd.print(fuelPercent);
+    lcd.print("% T:");
+    lcd.print(int(tempC));
+    lcd.print("C");
+
+    lcd.setCursor(0, 1);
+    lcd.print("D:");
+    lcd.print(distCm);
+    lcd.print("cm L:");
+    lcd.print(lightVal);
+
+    // LED/Buzzer alerts
+    if (fuelPercent < 20 || tempC > 50) {
+      digitalWrite(redLEDPin, HIGH);
+      digitalWrite(greenLEDPin, LOW);
+      tone(buzzerPin, 1000);
+    } else {
+      digitalWrite(redLEDPin, LOW);
+      digitalWrite(greenLEDPin, HIGH);
+      noTone(buzzerPin);
+    }
+
+    // Optional: use light sensor to control LED (e.g., "headlight")
+    if (lightVal < 300) {  // low light → headlight on
+      digitalWrite(greenLEDPin, HIGH);
+    }
+
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("Trip Stopped   ");
+    fuelServo.write(0);
+    digitalWrite(redLEDPin, LOW);
+    digitalWrite(greenLEDPin, LOW);
+    noTone(buzzerPin);
+  }
+
+  delay(1000);
+}
+
+// HC-SR04 distance function
+long readHCSR04() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  return duration * 0.0343 / 2;
+}
